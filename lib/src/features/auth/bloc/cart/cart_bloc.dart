@@ -11,11 +11,11 @@ class CartBloc extends Bloc<CartEvent, CartState> {
       emit(state.copyWith(cartItems: updatedCart));
     });
 
-    // Hapus dari keranjang
+    // Hapus dari keranjang berdasarkan kombinasi unik (id + color + panjang)
     on<RemoveFromCart>((event, emit) {
-      final updatedCart = state.cartItems
-          .where((item) => item['id'] != event.productId)
-          .toList();
+      final updatedCart = state.cartItems.where((item) {
+        return !(_isSameItem(item, event.productId));
+      }).toList();
       emit(state.copyWith(cartItems: updatedCart));
     });
 
@@ -27,7 +27,7 @@ class CartBloc extends Bloc<CartEvent, CartState> {
     // Update kuantitas produk
     on<UpdateCartQuantity>((event, emit) {
       final updatedCart = state.cartItems.map((item) {
-        if (item['id'] == event.productId) {
+        if (_isSameItem(item, event.productId)) {
           return {
             ...item,
             'quantity': event.quantity,
@@ -38,5 +38,11 @@ class CartBloc extends Bloc<CartEvent, CartState> {
 
       emit(state.copyWith(cartItems: updatedCart));
     });
+  }
+
+  /// Fungsi untuk membandingkan ID unik produk di keranjang
+  bool _isSameItem(Map<String, dynamic> item, String targetId) {
+    final itemId = '${item['id']}_${item['color']}_${item['panjang']}';
+    return itemId == targetId;
   }
 }
