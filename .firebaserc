@@ -1,5 +1,7 @@
 {
   "projects": {
-    "default": "kabelin-app"
-  }
+    "default": "sip-kabel-ec1d8"
+  },
+  "targets": {},
+  "etags": {}
 }

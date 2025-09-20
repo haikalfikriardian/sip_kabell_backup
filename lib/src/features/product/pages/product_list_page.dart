@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:iconsax/iconsax.dart';
+
 import 'product_detail_page.dart';
 
 class ProductListPage extends StatefulWidget {
@@ -22,137 +24,148 @@ class _ProductListPageState extends State<ProductListPage> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor:
+        theme.appBarTheme.backgroundColor ?? theme.scaffoldBackgroundColor,
+        surfaceTintColor: Colors.transparent,
         elevation: 0,
-        leading: const BackButton(color: Colors.black),
-        title: const Text('All Products', style: TextStyle(color: Colors.black)),
+        leading: BackButton(color: cs.onSurface),
+        title: Text('All Products', style: TextStyle(color: cs.onSurface)),
       ),
       body: Column(
         children: [
           const SizedBox(height: 8),
-
-          // === Search Bar ===
+          // Search
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: TextField(
               decoration: InputDecoration(
                 hintText: 'Cari produk...',
                 prefixIcon: const Icon(Icons.search),
-                fillColor: Colors.white,
                 filled: true,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                fillColor: theme.cardColor,
+                contentPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
+                  borderSide: BorderSide(color: theme.dividerColor),
                 ),
               ),
-              onChanged: (value) {
-                setState(() {
-                  searchQuery = value.toLowerCase();
-                });
-              },
+              onChanged: (v) => setState(() => searchQuery = v.toLowerCase()),
             ),
           ),
           const SizedBox(height: 12),
 
-          // === Filter Kategori ===
+          // Category chips
           SizedBox(
             height: 40,
             child: ListView.builder(
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 16),
               itemCount: categories.length,
-              itemBuilder: (context, index) {
-                final category = categories[index];
-                final isSelected = selectedCategory == category;
-
+              itemBuilder: (context, i) {
+                final cat = categories[i];
+                final sel = selectedCategory == cat;
                 return Padding(
                   padding: const EdgeInsets.only(right: 8),
                   child: ChoiceChip(
-                    label: Text(category),
-                    selected: isSelected,
-                    selectedColor: Colors.orange,
-                    backgroundColor: Colors.white,
+                    label: Text(cat),
+                    selected: sel,
+                    selectedColor: cs.primary,
+                    backgroundColor: theme.cardColor,
                     labelStyle: TextStyle(
-                      color: isSelected ? Colors.white : Colors.black,
+                      color: sel ? cs.onPrimary : cs.onSurface,
+                      fontWeight: FontWeight.w600,
                     ),
-                    onSelected: (_) {
-                      setState(() {
-                        selectedCategory = category;
-                      });
-                    },
+                    onSelected: (_) => setState(() => selectedCategory = cat),
                   ),
                 );
               },
             ),
           ),
-
           const SizedBox(height: 12),
 
-          // === Produk Grid ===
+          // Grid
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance.collection('products').snapshots(),
+              stream: FirebaseFirestore.instance
+                  .collection('products')
+                  .snapshots(),
               builder: (context, snapshot) {
                 if (snapshot.hasError) {
-                  return const Center(child: Text('Terjadi kesalahan'));
+                  return Center(
+                    child: Text('Terjadi kesalahan',
+                        style: TextStyle(color: cs.onSurface)),
+                  );
                 }
-
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
                 }
 
-                final allProducts = snapshot.data!.docs;
-
-                // Filter kategori & search
-                final filteredProducts = allProducts.where((doc) {
-                  final data = doc.data() as Map<String, dynamic>;
-                  final name = data['name']?.toString().toLowerCase() ?? '';
-                  final category = data['category'] ?? '';
-
-                  final matchesCategory = selectedCategory == 'All' || category == selectedCategory;
-                  final matchesSearch = name.contains(searchQuery);
-
-                  return matchesCategory && matchesSearch;
+                final docs = snapshot.data!.docs;
+                final list = docs.where((d) {
+                  final data = d.data() as Map<String, dynamic>;
+                  final name =
+                  (data['name'] ?? '').toString().toLowerCase().trim();
+                  final cat = (data['category'] ?? '').toString();
+                  final matchCat =
+                      selectedCategory == 'All' || cat == selectedCategory;
+                  final matchSearch = name.contains(searchQuery);
+                  return matchCat && matchSearch;
                 }).toList();
 
-                if (filteredProducts.isEmpty) {
-                  return const Center(child: Text('Produk tidak ditemukan.'));
+                if (list.isEmpty) {
+                  return Center(
+                    child: Text('Produk tidak ditemukan.',
+                        style: TextStyle(color: cs.onSurface)),
+                  );
                 }
 
                 return Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: GridView.builder(
-                    itemCount: filteredProducts.length,
-                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    itemCount: list.length,
+                    gridDelegate:
+                    const SliverGridDelegateWithFixedCrossAxisCount(
                       crossAxisCount: 2,
                       crossAxisSpacing: 12,
                       mainAxisSpacing: 12,
-                      childAspectRatio: 0.72,
+                      // disamain dengan Home agar layout konsisten & anti-overflow
+                      childAspectRatio: 0.68,
                     ),
-                    itemBuilder: (context, index) {
-                      final product = filteredProducts[index].data() as Map<String, dynamic>;
+                    itemBuilder: (context, i) {
+                      final data =
+                      list[i].data() as Map<String, dynamic>;
+
+                      final name = (data['name'] ?? 'Nama Produk').toString();
+                      final img = (data['imageUrl'] ?? '').toString();
+                      final pricePerMeter =
+                      (data['pricePerMeter'] ?? '0').toString();
 
                       return GestureDetector(
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => ProductDetailPage(productData: product),
-                            ),
-                          );
-                        },
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) =>
+                                ProductDetailPage(productData: data),
+                          ),
+                        ),
                         child: Container(
                           decoration: BoxDecoration(
-                            color: Colors.white,
+                            color: theme.cardColor,
                             borderRadius: BorderRadius.circular(16),
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.black12,
-                                blurRadius: 4,
+                                color: isDark
+                                    ? Colors.black.withOpacity(0.5)
+                                    : Colors.black12,
+                                blurRadius: 6,
                                 offset: const Offset(0, 2),
                               ),
                             ],
@@ -161,55 +174,68 @@ class _ProductListPageState extends State<ProductListPage> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              // Gambar
+                              // Thumbnail square (nempel ke kotak)
                               AspectRatio(
                                 aspectRatio: 1,
                                 child: ClipRRect(
                                   borderRadius: BorderRadius.circular(12),
-                                  child: Image.network(
-                                    product['imageUrl'] ?? '',
+                                  child: img.isNotEmpty
+                                      ? Image.network(
+                                    img,
                                     fit: BoxFit.cover,
                                     errorBuilder: (_, __, ___) =>
-                                    const Icon(Icons.image, size: 48),
+                                    const Center(
+                                      child: Icon(Icons.broken_image,
+                                          size: 48),
+                                    ),
+                                  )
+                                      : Container(
+                                    color: theme.dividerColor
+                                        .withOpacity(.12),
+                                    child: Icon(Icons.broken_image,
+                                        color: cs.onSurface
+                                            .withOpacity(.6)),
                                   ),
                                 ),
                               ),
                               const SizedBox(height: 6),
 
-                              // Nama
-                              Text(
-                                product['name'] ?? 'Nama Produk',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 14,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              const SizedBox(height: 4),
-
-                              // Harga
-                              Text(
-                                'Rp ${product['price'] ?? '0'}',
-                                style: const TextStyle(
-                                  fontSize: 13,
-                                  color: Colors.black54,
+                              // Title (max 2 lines)
+                              Flexible(
+                                child: Text(
+                                  name,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.bodyMedium?.copyWith(
+                                    fontWeight: FontWeight.w600,
+                                  ),
                                 ),
                               ),
                               const SizedBox(height: 4),
 
-                              // Tombol Kunci
-                              Expanded(
-                                child: Align(
-                                  alignment: Alignment.bottomRight,
-                                  child: Container(
-                                    padding: const EdgeInsets.all(6),
-                                    decoration: const BoxDecoration(
-                                      color: Colors.orange,
-                                      shape: BoxShape.circle,
-                                    ),
-                                    child: const Icon(Icons.lock,
-                                        size: 16, color: Colors.white),
+                              // Price per meter (sama persis format Home)
+                              Text(
+                                'Rp $pricePerMeter/m',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: cs.onSurface.withOpacity(0.7),
+                                ),
+                              ),
+
+                              const Spacer(),
+
+                              // FAB cart bulat (Iconsax.shopping_bag) — sama dengan Home
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: Container(
+                                  padding: const EdgeInsets.all(6),
+                                  decoration: BoxDecoration(
+                                    color: cs.primary,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(
+                                    Iconsax.shopping_bag,
+                                    size: 16,
+                                    color: Colors.white,
                                   ),
                                 ),
                               ),

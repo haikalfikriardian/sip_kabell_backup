@@ -1,13 +1,11 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:sip_kabell_app/src/features/checkout/helpers/midtrans_helper.dart';
+import 'package:iconsax/iconsax.dart';
 
-import '../../auth/bloc/cart/cart_bloc.dart';
-import '../../auth/bloc/cart/cart_event.dart';
-import '../../auth/bloc/cart/cart_state.dart';
-import '../../checkout/pages/payment_webview_page.dart';
+import '../../../blocs/cart/cart_bloc.dart';
+import '../../../blocs/cart/cart_event.dart';
+import '../../../blocs/cart/cart_state.dart';
+import '../../checkout/pages/checkout_page.dart';
 
 class CartPage extends StatefulWidget {
   const CartPage({super.key});
@@ -20,287 +18,415 @@ class _CartPageState extends State<CartPage> {
   Set<String> selectedItemIds = {};
   Map<String, int> itemQuantities = {};
 
+  // ✅ peredam error “Dismissible still part of the tree”
+  final Set<String> _pendingRemove = {};
+
+  @override
+  void initState() {
+    super.initState();
+    context.read<CartBloc>().add(FetchCartItems());
+  }
+
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F4F4),
+      backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
         elevation: 0,
-        leading: BackButton(color: Colors.black),
-        title: const Text('Keranjang', style: TextStyle(color: Colors.black)),
+        leading: BackButton(color: cs.onSurface),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Keranjang', style: TextStyle(color: cs.onSurface)),
+            BlocBuilder<CartBloc, CartState>(
+              builder: (context, state) {
+                return Text(
+                  "${state.cartItems.length} items",
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: cs.onSurface.withOpacity(.7),
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
       ),
       body: BlocBuilder<CartBloc, CartState>(
         builder: (context, state) {
-          final items = state.cartItems;
+          // filter item yang sedang dihapus agar langsung hilang dari tree
+          final visibleItems = state.cartItems
+              .where((it) => !_pendingRemove.contains(it['id']))
+              .toList();
 
-          if (items.isEmpty) {
-            return const Center(child: Text('Keranjang kosong'));
+          if (visibleItems.isEmpty) {
+            return Center(
+              child: Text('Keranjang kosong',
+                  style: TextStyle(color: cs.onSurface)),
+            );
           }
 
-          return Column(
-            children: [
-              Expanded(
-                child: ListView.builder(
-                  itemCount: items.length,
-                  padding: const EdgeInsets.all(16),
-                  itemBuilder: (context, index) {
-                    final item = items[index];
-                    final id = item['id'];
-                    final isSelected = selectedItemIds.contains(id);
-                    final quantity = item['quantity'] ?? 1;
+          return ListView.builder(
+            padding: const EdgeInsets.fromLTRB(20, 10, 20, 140),
+            itemCount: visibleItems.length,
+            itemBuilder: (context, index) {
+              final item = visibleItems[index];
+              final id = item['id'].toString();
+              final isSelected = selectedItemIds.contains(id);
+              final quantity = (item['quantity'] ?? 1) as int;
 
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 16),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black12,
-                            blurRadius: 6,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                        Checkbox(
-                        value: isSelected,
-                        onChanged: (_) {
-                          setState(() {
-                            if (isSelected) {
-                              selectedItemIds.remove(id);
-                            } else {
-                              selectedItemIds.add(id);
-                              itemQuantities[id] = quantity;
-                            }
-                          });
-                        },
-                        activeColor: Colors.orange,
-                      ),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: Image.network(
-                          item['imageUrl'] ?? '',
-                          width: 60,
-                          height: 60,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => const Icon(Icons.broken_image),
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                child: Dismissible(
+                  key: ValueKey(id),
+                  direction: DismissDirection.endToStart,
+
+                  // biar animasi selesai rapi dulu
+                  confirmDismiss: (direction) async => true,
+
+                  onDismissed: (_) async {
+                    // tandai sedang dihapus -> langsung hilang dari list builder
+                    setState(() => _pendingRemove.add(id));
+
+                    // sinkron ke BLoC
+                    context.read<CartBloc>().add(RemoveFromCart(id));
+
+                    // bersihkan state lokal
+                    setState(() {
+                      selectedItemIds.remove(id);
+                      itemQuantities.remove(id);
+                    });
+
+                    // opsional: lepas penanda jika BLoC sudah mengosongkan state
+                    // (aman dibiarkan juga, karena item takkan muncul lagi)
+                    await Future.delayed(const Duration(milliseconds: 300));
+                    if (mounted) {
+                      setState(() => _pendingRemove.remove(id));
+                    }
+                  },
+
+                  background: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    decoration: BoxDecoration(
+                      color: cs.errorContainer
+                          .withOpacity(isDark ? .35 : 1.0),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Row(
+                      children: [
+                        const Spacer(),
+                        Icon(Iconsax.trash, color: cs.error, size: 26),
+                      ],
+                    ),
+                  ),
+
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: theme.cardColor,
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: isDark
+                              ? Colors.black.withOpacity(.5)
+                              : Colors.black12,
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
                         ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              item['name'] ?? '',
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16), // ✅ Diperbesar
-                            ),
-                            Text(
-                              item['category'] ?? '',
-                              style: const TextStyle(color: Colors.grey, fontSize: 13), // ✅ Kategori kabel muncul
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Rp ${item['price'] ?? '0'}',
-                              style: const TextStyle(fontWeight: FontWeight.w500),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Column(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          IconButton(
-                            onPressed: () {
-                              context.read<CartBloc>().add(RemoveFromCart(id));
-                            },
-                            icon: const Icon(Icons.delete, color: Colors.orange),
-                          ),
-                          Row(
-                            children: [
-                              _QtyButton(
-                                icon: Icons.remove,
-                                onPressed: () {
-                                  if (quantity > 1) {
-                                    context.read<CartBloc>().add(UpdateCartQuantity(id, quantity - 1));
+                      ],
+                    ),
+                    padding: const EdgeInsets.all(12),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Checkbox
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4.0),
+                          child: Transform.scale(
+                            scale: 1.05,
+                            child: Checkbox(
+                              value: isSelected,
+                              onChanged: (_) {
+                                setState(() {
+                                  if (isSelected) {
+                                    selectedItemIds.remove(id);
+                                  } else {
+                                    selectedItemIds.add(id);
+                                    itemQuantities[id] = quantity;
                                   }
-                                },
+                                });
+                              },
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(6),
                               ),
-                              Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 8),
-                                child: Text('$quantity', style: const TextStyle(fontWeight: FontWeight.bold)),
+                              fillColor: MaterialStateProperty.resolveWith(
+                                    (states) => states.contains(
+                                    MaterialState.selected)
+                                    ? cs.primary
+                                    : theme.dividerColor,
                               ),
-                              _QtyButton(
-                                icon: Icons.add,
-                                onPressed: () {
-                                  context.read<CartBloc>().add(UpdateCartQuantity(id, quantity + 1));
-                                },
+                              checkColor: cs.onPrimary,
+                            ),
+                          ),
+                        ),
+
+                        // Gambar
+                        SizedBox(
+                          width: 88,
+                          child: AspectRatio(
+                            aspectRatio: 1,
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: Image.network(
+                                (item['imageUrl'] ?? '').toString(),
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => Container(
+                                  color: theme.dividerColor.withOpacity(.12),
+                                  child: Icon(Icons.broken_image,
+                                      color: cs.onSurface.withOpacity(.6)),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+
+                        // Info
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                (item['name'] ?? '').toString(),
+                                style: theme.textTheme.titleSmall?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                  color: cs.onSurface,
+                                ),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              const SizedBox(height: 6),
+                              if ((item['category'] ?? '').toString().isNotEmpty)
+                                Text(
+                                  (item['category'] ?? '').toString(),
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: cs.onSurface.withOpacity(.6),
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              const SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  Text(
+                                    "Rp ${(item['totalPrice'] ?? 0)}",
+                                    style: theme.textTheme.bodyMedium?.copyWith(
+                                      color: cs.primary,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  Text(
+                                    "  x$quantity",
+                                    style: theme.textTheme.bodyMedium?.copyWith(
+                                      color: cs.onSurface,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ],
                           ),
+                        ),
 
-                              ],
+                        // Qty + delete
+                        Column(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            IconButton(
+                              onPressed: () {
+                                // tampilkan animasi swipe manual: langsung remove
+                                setState(() => _pendingRemove.add(id));
+                                context
+                                    .read<CartBloc>()
+                                    .add(RemoveFromCart(id));
+                                setState(() => selectedItemIds.remove(id));
+                              },
+                              icon: Icon(Iconsax.trash,
+                                  color: cs.onSurface.withOpacity(.6), size: 22),
+                              tooltip: 'Hapus',
                             ),
-                        ],
+                            const SizedBox(height: 4),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: theme.cardColor,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: theme.dividerColor),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  _QtyButton(
+                                    icon: Icons.remove,
+                                    onPressed: () {
+                                      if (quantity > 1) {
+                                        context.read<CartBloc>().add(
+                                            UpdateCartQuantity(id, quantity - 1));
+                                      }
+                                    },
+                                  ),
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 10),
+                                    child: Text(
+                                      '$quantity',
+                                      style:
+                                      theme.textTheme.bodyMedium?.copyWith(
+                                        fontWeight: FontWeight.bold,
+                                        color: cs.onSurface,
+                                      ),
+                                    ),
+                                  ),
+                                  _QtyButton(
+                                    icon: Icons.add,
+                                    onPressed: () {
+                                      context.read<CartBloc>().add(
+                                          UpdateCartQuantity(id, quantity + 1));
+                                    },
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      ),
+
+      // Bottom summary (voucher row DIHILANGKAN)
+      bottomNavigationBar: Container(
+        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+        decoration: BoxDecoration(
+          color: theme.cardColor,
+          borderRadius: const BorderRadius.only(
+            topLeft: Radius.circular(30),
+            topRight: Radius.circular(30),
+          ),
+          boxShadow: [
+            BoxShadow(
+              offset: const Offset(0, -15),
+              blurRadius: 20,
+              color: isDark
+                  ? Colors.black.withOpacity(.45)
+                  : const Color(0xFFDADADA).withOpacity(.25),
+            ),
+          ],
+        ),
+        child: SafeArea(
+          top: false,
+          child: Row(
+            children: [
+              Expanded(child: _buildTotalInfo(context)),
+              Expanded(
+                child: BlocBuilder<CartBloc, CartState>(
+                  builder: (context, state) {
+                    final items = state.cartItems;
+                    return ElevatedButton(
+                      onPressed: selectedItemIds.isEmpty
+                          ? null
+                          : () => _goToCheckoutPage(context, items),
+                      style: ElevatedButton.styleFrom(
+                        elevation: 0,
+                        backgroundColor: cs.primary,
+                        foregroundColor: cs.onPrimary,
+                        minimumSize: const Size(double.infinity, 48),
+                        shape: const RoundedRectangleBorder(
+                          borderRadius: BorderRadius.all(Radius.circular(16)),
+                        ),
                       ),
+                      child: const Text("Continue to Checkout"),
                     );
                   },
                 ),
               ),
-
-              // TOTAL SECTION
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black12,
-                      blurRadius: 10,
-                      offset: const Offset(0, -4),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _buildTotalInfo(),
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 50,
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.orange,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        ),
-                        onPressed: selectedItemIds.isEmpty ? null : () => _checkoutSelectedItems(context, items),
-                        child: const Text("Continue to Payment", style: TextStyle(fontSize: 16)),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
             ],
-          );
-        },
+          ),
+        ),
       ),
     );
   }
 
-  Widget _buildTotalInfo() {
+  Widget _buildTotalInfo(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
     final total = _calculateSelectedTotal();
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        const Text("Subtotal", style: TextStyle(fontSize: 16)),
-        Text("Rp ${total.toString()}", style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-      ],
+    return Text.rich(
+      TextSpan(
+        text: "Total:\n",
+        style: theme.textTheme.bodySmall?.copyWith(
+          color: cs.onSurface.withOpacity(.7),
+        ),
+        children: [
+          TextSpan(
+            text: "Rp $total",
+            style: theme.textTheme.titleMedium?.copyWith(
+              color: cs.onSurface,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
   int _calculateSelectedTotal() {
     final items = context.read<CartBloc>().state.cartItems;
     int total = 0;
-
     for (var item in items) {
       final id = item['id'];
       if (selectedItemIds.contains(id)) {
-        final qty = item['quantity'] ?? 1;
-        final price = (item['price'] as num?)?.toInt() ?? 0;
-        total += (price * qty).toInt();
+        final qty = ((item['quantity'] ?? 1) as num).toInt();
+        final price = ((item['totalPrice'] ?? 0) as num).toInt();
+        total += price * qty;
       }
     }
-
     return total;
   }
 
+  void _goToCheckoutPage(
+      BuildContext context, List<Map<String, dynamic>> items) {
+    final selectedItems = items
+        .where((item) => selectedItemIds.contains(item['id']))
+        .map((item) {
+      return {
+        ...item,
+        'productId': item['productId'] ?? item['id'], // fallback ke id
+        'panjang': item['panjang'] ?? 1, // default 1 meter kalau kosong
+        'quantity': item['quantity'] ?? 1,
+      };
+    }).toList();
 
-  Future<void> _checkoutSelectedItems(BuildContext context, List<Map<String, dynamic>> items) async {
-    final selectedItems = items.where((item) => selectedItemIds.contains(item['id'])).toList();
-
-    if (selectedItems.isEmpty) return;
-
-    final addressController = TextEditingController();
-    final address = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Alamat Pengiriman"),
-        content: TextField(
-          controller: addressController,
-          decoration: const InputDecoration(hintText: "Contoh: Jl. Mawar No. 123"),
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => BlocProvider.value(
+          value: context.read<CartBloc>(),
+          child: CheckoutPage(selectedItems: selectedItems),
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, null), child: const Text("Batal")),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, addressController.text),
-            child: const Text("Lanjut"),
-          ),
-        ],
       ),
     );
-
-    if (address == null || address.isEmpty) return;
-
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Kamu belum login.")),
-      );
-      return;
-    }
-
-    try {
-      final total = _calculateSelectedTotal();
-      final itemsToSave = selectedItems.map((item) {
-        final id = item['id'];
-        return {
-          ...item,
-          'quantity': itemQuantities[id] ?? 1,
-        };
-      }).toList();
-
-      final orderRef = await FirebaseFirestore.instance.collection('orders').add({
-        'userId': user.uid,
-        'userName': user.displayName ?? user.email ?? 'User Tanpa Nama',
-        'userAddress': address,
-        'status': 'Menunggu Pembayaran',
-        'createdAt': FieldValue.serverTimestamp(),
-        'items': itemsToSave,
-      });
-
-      final snapUrl = await createMidtransTransaction(
-        orderId: orderRef.id,
-        grossAmount: total,
-        customerName: user.displayName ?? user.email ?? 'User',
-      );
-
-      for (var item in selectedItems) {
-        context.read<CartBloc>().add(RemoveFromCart(item['id']));
-      }
-
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => PaymentWebViewPage(
-            url: snapUrl,
-            orderId: orderRef.id,
-            totalAmount: total,
-          ),
-        ),
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Checkout gagal: $e")),
-      );
-    }
   }
+
 }
 
 class _QtyButton extends StatelessWidget {
@@ -311,17 +437,19 @@ class _QtyButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    final cs = Theme.of(context).colorScheme;
+    return SizedBox(
       width: 28,
       height: 28,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: Colors.grey.shade300),
-      ),
-      child: IconButton(
-        icon: Icon(icon, size: 16),
-        padding: EdgeInsets.zero,
-        onPressed: onPressed,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(6),
+          onTap: onPressed,
+          child: Center(
+            child: Icon(icon, size: 16, color: cs.onSurface),
+          ),
+        ),
       ),
     );
   }
